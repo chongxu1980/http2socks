@@ -1,5 +1,5 @@
 import logging
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
                 format='%(asctime)s [line:%(lineno)d] %(levelname)s %(message)s',
                 datefmt='%M:%S',
                 )
@@ -7,8 +7,10 @@ import asyncio
 import argparse
 import re
 import socks
+import traceback
 
 TUNNEL_OK = '''HTTP/1.1 200 Connection Established\r\nProxy-Connection: close\r\n\r\n'''
+BUFF = 1024
 
 def get_sock(address):
     sock = socks.socksocket()
@@ -79,7 +81,7 @@ def parse_response_header(response_header):
     lines = response_header.strip().split('\r\n')
     status_code = int(lines[0].split(' ')[1])
 
-    header = {}
+    headers = {}
     for i in range(1, len(lines)):
         line = lines[i].split(':')
         key = line.pop(0)
@@ -106,20 +108,19 @@ async def do_proxy(host, port, method, uri, request_headers, request, reader, wr
         got_header = False
         headers = {}
         while True:
-            while True:
-                buf = await remote_reader.read(4096)
-                if not buf:
-                    break
-                response += buf
-                writer.write(buf)
-                logging.debug('read/write buf success')
-            response_str = response.decode('ascii')
-            if not got_header and '\r\n\r\n' in response_str:
+            buf = await remote_reader.read(BUFF)
+            response += buf
+            writer.write(buf)
+            logging.debug('read/write buf success')
+            if not got_header and b'\r\n\r\n' in response:
                 got_header = True
-                response_header = response_str.split('\r\n\r\n')[0] +'\r\n\r\n'
-                logging.debug(response_str)
+                logging.debug('set got header')
+                response_header = (response.split(b'\r\n\r\n')[0] + b'\r\n\r\n').decode('ascii')
                 header_length = len(response_header)
-                sataus_code, headers = parser_response_header(response_header)
+                logging.debug('response_header is {}'.format(response_header))
+                status_code, headers = parse_response_header(response_header)
+                logging.debug('status_code is {}'.format(status_code))
+                logging.debug('headers is {}'.format(headers))
 
             if got_header:
                 ''' return header when nothing responsed '''
@@ -139,14 +140,14 @@ async def do_proxy(host, port, method, uri, request_headers, request, reader, wr
                         logging.debug('not buf')
                         break
     except Exception as err:
-        logging.error(err)
+        traceback.print_exc()
         writer.close()
         remote_writer.close()
         return
 
 async def write_to(reader, writer):
     while True:
-        buf = await reader.read(4096)
+        buf = await reader.read(BUFF)
         if not buf:
             writer.close()
             break
@@ -159,7 +160,7 @@ async def do_tunnel(host, port, reader, writer):
         remote_reader, remote_writer = await asyncio.open_connection(sock=sock)
         logging.info('connected to {} {}'.format(host, port))
     except Exception as err:
-        logging.error('connect err' + host + ':' + str(port))
+        logging.error('connect err {}:{}'.format(host, port))
         writer.write(TUNNEL_FAIL.encode('ascii'))
         writer.close()
         return
@@ -175,7 +176,7 @@ async def handle_connection(reader, writer):
     request = ''
     got_header = False
     while True:
-        buf = await reader.read(4096)
+        buf = await reader.read(BUFF)
         request += buf.decode('ascii')
         if not got_header and '\r\n\r\n' in request:
             got_header = True

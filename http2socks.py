@@ -1,5 +1,5 @@
 import logging
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
                 format='%(asctime)s [line:%(lineno)d] %(levelname)s %(message)s',
                 datefmt='%M:%S',
                 )
@@ -102,7 +102,7 @@ async def do_proxy(host, port, method, uri, request_headers, request, reader, wr
         writer.close()
         return
     try:
-        remote_writer.write(request.encode('ascii'))
+        remote_writer.write(request)
         logging.debug("Write request success.")
         response = b''
         got_header = False
@@ -173,14 +173,14 @@ async def do_tunnel(host, port, reader, writer):
     )
 
 async def handle_connection(reader, writer):
-    request = ''
+    request = b''
     got_header = False
     while True:
         buf = await reader.read(BUFF)
-        request += buf.decode('ascii')
-        if not got_header and '\r\n\r\n' in request:
+        request += buf
+        if not got_header and b'\r\n\r\n' in request:
             got_header = True
-            request_header = request.split('\r\n\r\n')[0] + '\r\n\r\n'
+            request_header = (request.split(b'\r\n\r\n')[0] + b'\r\n\r\n').decode('ascii')
             header_length = len(request_header)
             host, port, method, uri, headers = parse_request_header(request_header)
             logging.debug('host: {}, port:{}'.format(host, port))
@@ -200,14 +200,14 @@ async def handle_connection(reader, writer):
                 break
         if not buf:
             break
-    if not '\r\n\r\n' in request:
+    if not b'\r\n\r\n' in request:
         logging.warning('request err, close this task')
         writer.close()
     if method in ['GET', 'POST', 'HEAD']:
         request_header = re.sub('Proxy-Connection: .+\r\n', '', request_header)
         request_header = re.sub('Connection: .+', '', request_header)
         request_header = re.sub('\r\n\r\n', '\r\nConncetion: close\r\n\r\n', request_header)
-        request = request_header + request[header_length:]
+        request = request_header.encode('ascii') + request[header_length:]
 
     if method in ['CONNECT']:
         await do_tunnel(host, port, reader, writer)

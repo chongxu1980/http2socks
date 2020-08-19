@@ -1,5 +1,8 @@
+#!/usr/bin/python3
+# -*- coding: UTF-8 -*-
+
 import logging
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
                 format='%(asctime)s [line:%(lineno)d] %(levelname)s %(message)s',
                 datefmt='%M:%S',
                 )
@@ -112,10 +115,10 @@ async def do_proxy(host, port, method, uri, request_headers, request, reader, wr
             response += buf
             writer.write(buf)
             logging.debug('read/write buf success')
-            if not got_header and b'\r\n\r\n' in response:
+            if not got_header and '\r\n\r\n'.encode('ascii') in response:
                 got_header = True
                 logging.debug('set got header')
-                response_header = (response.split(b'\r\n\r\n')[0] + b'\r\n\r\n').decode('ascii')
+                response_header = (response.split('\r\n\r\n'.encode('ascii'))[0] + '\r\n\r\n'.encode('ascii')).decode('ascii')
                 header_length = len(response_header)
                 logging.debug('response_header is {}'.format(response_header))
                 status_code, headers = parse_response_header(response_header)
@@ -147,12 +150,16 @@ async def do_proxy(host, port, method, uri, request_headers, request, reader, wr
 
 async def write_to(reader, writer):
     while True:
-        buf = await reader.read(BUFF)
-        if not buf:
-            writer.close()
+        try:
+            buf = await reader.read(BUFF)
+            if not buf:
+                writer.close()
+                break
+            writer.write(buf)
+            await writer.drain()
+        except Exception as err:
+            logging.error(err)
             break
-        writer.write(buf)
-        await writer.drain()
 
 async def do_tunnel(host, port, reader, writer):
     try:
@@ -178,9 +185,9 @@ async def handle_connection(reader, writer):
     while True:
         buf = await reader.read(BUFF)
         request += buf
-        if not got_header and b'\r\n\r\n' in request:
+        if not got_header and '\r\n\r\n'.encode('ascii') in request:
             got_header = True
-            request_header = (request.split(b'\r\n\r\n')[0] + b'\r\n\r\n').decode('ascii')
+            request_header = (request.split('\r\n\r\n'.encode('ascii'))[0] + '\r\n\r\n'.encode('ascii')).decode('ascii')
             header_length = len(request_header)
             host, port, method, uri, headers = parse_request_header(request_header)
             logging.debug('host: {}, port:{}'.format(host, port))
@@ -200,7 +207,7 @@ async def handle_connection(reader, writer):
                 break
         if not buf:
             break
-    if not b'\r\n\r\n' in request:
+    if not '\r\n\r\n'.encode('ascii') in request:
         logging.warning('request err, close this task')
         writer.close()
     if method in ['GET', 'POST', 'HEAD']:
